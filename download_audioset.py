@@ -64,10 +64,10 @@ def parse_arguments():
 
     parser.add_argument('-cp',
                         '--csv-path',
-                        dest='csv path (or url)',
+                        dest='csv_path',
                         action='store',
                         type=str,
-                        help='Path to evaluation segments file')
+                        help='Path (or url) to the original csv file')
 
     parser.add_argument('-ac',
                         '--audio-codec',
