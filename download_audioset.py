@@ -31,6 +31,8 @@ LOGGER.setLevel(logging.DEBUG)
 EVAL_URL = 'http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/eval_segments.csv'
 BALANCED_TRAIN_URL = 'http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/balanced_train_segments.csv'
 UNBALANCED_TRAIN_URL = 'http://storage.googleapis.com/us_audioset/youtube_corpus/v1/csv/unbalanced_train_segments.csv'
+STRONG_TRAIN = 'http://storage.googleapis.com/us_audioset/youtube_corpus/strong/audioset_train_strong.tsv'
+STRONG_EVAL = 'http://storage.googleapis.com/us_audioset/youtube_corpus/strong/audioset_eval_strong.tsv'
 
 
 def parse_arguments():
@@ -60,29 +62,12 @@ def parse_arguments():
                         default='./bin/ffmpeg/ffprobe',
                         help='Path to ffprobe executable')
 
-    parser.add_argument('-e',
-                        '--eval',
-                        dest='eval_segments_path',
+    parser.add_argument('-cp',
+                        '--csv-path',
+                        dest='csv path (or url)',
                         action='store',
                         type=str,
-                        default=EVAL_URL,
                         help='Path to evaluation segments file')
-
-    parser.add_argument('-b',
-                        '--balanced-train',
-                        dest='balanced_train_segments_path',
-                        action='store',
-                        type=str,
-                        default=BALANCED_TRAIN_URL,
-                        help='Path to balanced train segments file')
-
-    parser.add_argument('-u',
-                        '--unbalanced-train',
-                        dest='unbalanced_train_segments_path',
-                        action='store',
-                        type=str,
-                        default=UNBALANCED_TRAIN_URL,
-                        help='Path to unbalanced train segments file')
 
     parser.add_argument('-ac',
                         '--audio-codec',
@@ -192,11 +177,14 @@ def parse_arguments():
                         default=False,
                         help='Prints verbose info to stdout')
 
-    parser.add_argument('data_dir',
+    parser.add_argument('-dd',
+                        '--data_dir',
                         action='store',
                         type=str,
                         help='Path to directory where AudioSet data will be stored')
 
+    parser.add_argument("--percent_from", default=0.0, type=float)
+    parser.add_argument("--percent_to", default=100.0, type=float)
 
     return vars(parser.parse_args())
 
@@ -614,7 +602,7 @@ def download_subset_file(subset_url, dataset_dir):
 
 
 def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
-                           num_workers, **ffmpeg_cfg):
+                           num_workers, percent_from, percent_to,**ffmpeg_cfg):
     """
     Download subset segment file and videos
 
@@ -639,11 +627,19 @@ def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
                        downloading and decoding done by ffmpeg
                        (Type: dict[str, *])
     """
+
+    def _select_rows(csv_lines, percent_from: float, percent_to: float):
+        total = len(csv_lines)
+        idx_from = int(total * (percent_from / 100.0))
+        idx_to = int(total * (percent_to / 100.0))
+        return csv_lines[idx_from:idx_to]
+
     subset_name = get_subset_name(subset_path)
 
     LOGGER.info('Starting download jobs for subset "{}"'.format(subset_name))
     with open(subset_path, 'r') as f:
         subset_data = csv.reader(f)
+        subset_data = _select_rows(subset_data, percent_from, percent_to)
 
         # Set up multiprocessing pool
         pool = mp.Pool(num_workers)
@@ -783,13 +779,13 @@ def download_random_subset_files(subset_url, dataset_dir, ffmpeg_path, ffprobe_p
     LOGGER.info('Finished download jobs for subset "{}"'.format(subset_name))
 
 
-def download_subset(subset_path, dataset_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, **ffmpeg_cfg):
+def download_subset(csv_path, dataset_dir, ffmpeg_path, ffprobe_path,
+                    num_workers, percent_from, percent_to, **ffmpeg_cfg):
     """
     Download all files for a subset, including the segment file, and the audio and video files.
 
     Args:
-        subset_path:    Path to subset segments file
+        csv_path:    Path to subset segments file
                         (Type: str)
 
         dataset_dir:    Path to dataset directory where files are saved
@@ -812,25 +808,25 @@ def download_subset(subset_path, dataset_dir, ffmpeg_path, ffprobe_path,
     Returns:
 
     """
-    if is_url(subset_path):
-        subset_path = download_subset_file(subset_path, dataset_dir)
+    if is_url(csv_path):
+        csv_path = download_subset_file(csv_path, dataset_dir)
 
-    subset_name = get_subset_name(subset_path)
+    subset_name = get_subset_name(csv_path)
     data_dir = init_subset_data_dir(dataset_dir, subset_name)
 
-    download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
-                           num_workers, **ffmpeg_cfg)
+    download_subset_videos(csv_path, data_dir, ffmpeg_path, ffprobe_path,
+                           num_workers, percent_from, percent_to,**ffmpeg_cfg)
 
 
-def download_audioset(data_dir, ffmpeg_path, ffprobe_path, eval_segments_path,
-                      balanced_train_segments_path, unbalanced_train_segments_path,
+def download_audioset(data_dir, ffmpeg_path, ffprobe_path, csv_path,
+                      percent_from, percent_to,
                       disable_logging=False, verbose=False, num_workers=4,
                       log_path=None, **ffmpeg_cfg):
     """
     Download AudioSet files
 
     Args:
-        data_dir:                       Directory where dataset files will
+        data_dir:                       Directory where a subset of the dataset files will
                                         be saved
                                         (Type: str)
 
@@ -840,14 +836,9 @@ def download_audioset(data_dir, ffmpeg_path, ffprobe_path, eval_segments_path,
         ffprobe_path:                   Path to ffprobe executable
                                         (Type: str)
 
-        eval_segments_path:             Path to evaluation segments file
+        csv_path:             Path to evaluation segments file
                                         (Type: str)
 
-        balanced_train_segments_path:   Path to balanced train segments file
-                                        (Type: str)
-
-        unbalanced_train_segments_path: Path to unbalanced train segments file
-                                        (Type: str)
 
     Keyword Args:
         disable_logging:                Disables logging to a file if True
@@ -875,13 +866,8 @@ def download_audioset(data_dir, ffmpeg_path, ffprobe_path, eval_segments_path,
     multiprocessing_logging.install_mp_handler()
     LOGGER.debug('Initialized logging.')
 
-
-    download_subset(eval_segments_path, data_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, **ffmpeg_cfg)
-    download_subset(balanced_train_segments_path, data_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, **ffmpeg_cfg)
-    download_subset(unbalanced_train_segments_path, data_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, **ffmpeg_cfg)
+    download_subset(csv_path, data_dir, ffmpeg_path, ffprobe_path,
+                    num_workers, percent_from, percent_to, **ffmpeg_cfg)
 
 
 if __name__ == '__main__':
