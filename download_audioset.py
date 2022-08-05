@@ -6,6 +6,7 @@ import argparse
 import atexit
 import collections
 import csv
+import pandas as pd
 import logging.handlers
 import multiprocessing as mp
 import os
@@ -185,6 +186,7 @@ def parse_arguments():
 
     parser.add_argument("--percent_from", default=0.0, type=float)
     parser.add_argument("--percent_to", default=100.0, type=float)
+    parser.add_argument("--csv_read_like", type=str, choices=['audioset_normal', 'audioset_strong', 'vggsound'])
 
     return vars(parser.parse_args())
 
@@ -602,7 +604,7 @@ def download_subset_file(subset_url, dataset_dir):
 
 
 def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
-                           num_workers, percent_from, percent_to,**ffmpeg_cfg):
+                           num_workers, percent_from, percent_to, csv_read_like, **ffmpeg_cfg):
     """
     Download subset segment file and videos
 
@@ -634,50 +636,66 @@ def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
         idx_to = int(total * (percent_to / 100.0))
         return csv_lines[idx_from:idx_to]
 
+    def _read_csv(csv_path, csv_read_like):
+        if csv_read_like == 'audioset_normal':
+            subset_data = pd.read_csv(csv_path, header=2, sep=",", quotechar='"', skipinitialspace=True,
+                                      names=['segment_id', 'start_time_seconds', 'end_time_seconds', 'positive_labels'])
+        elif csv_read_like == 'audioset_strong':
+            subset_data = pd.read_csv(csv_path, header=0, sep="\t",
+                                      names=['segment_id', 'start_time_seconds', 'end_time_seconds', 'label'])
+            # wow a lot of todo left. the start_ and end_ of information should be come from the original audioset.
+            # remove overlapping by id.
+            raise NotImplementedError('ah this sucks ughhh')
+        elif csv_read_like == 'vggsound':
+            subset_data = pd.read_csv(csv_path, header=None, sep=",",
+                                      names=['segment_id', 'start_time_seconds', 'positive_labels', 'split'])
+        else:
+            raise NotImplementedError
+
+        return subset_data
+
     subset_name = get_subset_name(subset_path)
 
     LOGGER.info('Starting download jobs for subset "{}"'.format(subset_name))
-    with open(subset_path, 'r') as f:
-        subset_data = list(csv.reader(f))
-        subset_data = _select_rows(subset_data, percent_from, percent_to)
+    subset_data = _read_csv(subset_path, csv_read_like)
+    subset_data = _select_rows(subset_data, percent_from, percent_to)
 
-        # Set up multiprocessing pool
-        pool = mp.Pool(num_workers)
+    # Set up multiprocessing pool
+    pool = mp.Pool(num_workers)
+    try:
+        # for row_idx, row in enumerate(subset_data):
+        for row_idx, row in subset_data.iterrows():
+            ytid, ts_start = row['segment_id'], float(row['start_time_seconds'])
+            ts_end = ts_start + 10.0
+
+            # Skip files that already have been downloaded
+            media_filename = get_media_filename(ytid, ts_start, ts_end)
+            video_filepath = os.path.join(data_dir, 'video', media_filename + '.' + ffmpeg_cfg.get('video_format', 'mp4'))
+            audio_filepath = os.path.join(data_dir, 'audio', media_filename + '.' + ffmpeg_cfg.get('audio_format', 'wav'))
+            if os.path.exists(video_filepath) and os.path.exists(audio_filepath):
+                info_msg = 'Already downloaded video {} ({} - {}). Skipping.'
+                LOGGER.info(info_msg.format(ytid, ts_start, ts_end))
+                continue
+
+            worker_args = [ytid, ts_start, ts_end, data_dir, ffmpeg_path, ffprobe_path]
+            pool.apply_async(partial(segment_mp_worker, **ffmpeg_cfg), worker_args)
+            # Run serially
+            #segment_mp_worker(*worker_args, **ffmpeg_cfg)
+
+    except csv.Error as e:
+        err_msg = 'Encountered error in {} at line {}: {}'
+        LOGGER.error(err_msg)
+        sys.exit(err_msg.format(subset_path, row_idx+1, e))
+    except KeyboardInterrupt:
+        LOGGER.info("Forcing exit.")
+        exit()
+    finally:
         try:
-            for row_idx, row in enumerate(subset_data):
-                # Skip commented lines
-                if row[0][0] == '#':
-                    continue
-                ytid, ts_start, ts_end = row[0], float(row[1]), float(row[2])
-
-                # Skip files that already have been downloaded
-                media_filename = get_media_filename(ytid, ts_start, ts_end)
-                video_filepath = os.path.join(data_dir, 'video', media_filename + '.' + ffmpeg_cfg.get('video_format', 'mp4'))
-                audio_filepath = os.path.join(data_dir, 'audio', media_filename + '.' + ffmpeg_cfg.get('audio_format', 'wav'))
-                if os.path.exists(video_filepath) and os.path.exists(audio_filepath):
-                    info_msg = 'Already downloaded video {} ({} - {}). Skipping.'
-                    LOGGER.info(info_msg.format(ytid, ts_start, ts_end))
-                    continue
-
-                worker_args = [ytid, ts_start, ts_end, data_dir, ffmpeg_path, ffprobe_path]
-                pool.apply_async(partial(segment_mp_worker, **ffmpeg_cfg), worker_args)
-                # Run serially
-                #segment_mp_worker(*worker_args, **ffmpeg_cfg)
-
-        except csv.Error as e:
-            err_msg = 'Encountered error in {} at line {}: {}'
-            LOGGER.error(err_msg)
-            sys.exit(err_msg.format(subset_path, row_idx+1, e))
+            pool.close()
+            pool.join()
         except KeyboardInterrupt:
             LOGGER.info("Forcing exit.")
             exit()
-        finally:
-            try:
-                pool.close()
-                pool.join()
-            except KeyboardInterrupt:
-                LOGGER.info("Forcing exit.")
-                exit()
 
     LOGGER.info('Finished download jobs for subset "{}"'.format(subset_name))
 
@@ -780,7 +798,7 @@ def download_random_subset_files(subset_url, dataset_dir, ffmpeg_path, ffprobe_p
 
 
 def download_subset(csv_path, dataset_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, percent_from, percent_to, **ffmpeg_cfg):
+                    num_workers, percent_from, percent_to, csv_read_like, **ffmpeg_cfg):
     """
     Download all files for a subset, including the segment file, and the audio and video files.
 
@@ -815,11 +833,11 @@ def download_subset(csv_path, dataset_dir, ffmpeg_path, ffprobe_path,
     data_dir = init_subset_data_dir(dataset_dir, subset_name)
 
     download_subset_videos(csv_path, data_dir, ffmpeg_path, ffprobe_path,
-                           num_workers, percent_from, percent_to,**ffmpeg_cfg)
+                           num_workers, percent_from, percent_to, csv_read_like, **ffmpeg_cfg)
 
 
 def download_audioset(data_dir, ffmpeg_path, ffprobe_path, csv_path,
-                      percent_from, percent_to,
+                      percent_from, percent_to, csv_read_like,
                       disable_logging=False, verbose=False, num_workers=4,
                       log_path=None, **ffmpeg_cfg):
     """
@@ -867,7 +885,7 @@ def download_audioset(data_dir, ffmpeg_path, ffprobe_path, csv_path,
     LOGGER.debug('Initialized logging.')
 
     download_subset(csv_path, data_dir, ffmpeg_path, ffprobe_path,
-                    num_workers, percent_from, percent_to, **ffmpeg_cfg)
+                    num_workers, percent_from, percent_to, csv_read_like, **ffmpeg_cfg)
 
 
 if __name__ == '__main__':
