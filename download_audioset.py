@@ -74,7 +74,7 @@ def parse_arguments():
                         dest='audio_codec',
                         action='store',
                         type=str,
-                        default='flac',
+                        default='wav',
                         help='Name of audio codec used by ffmpeg to encode output audio')
 
     parser.add_argument('-asr',
@@ -106,7 +106,7 @@ def parse_arguments():
                         dest='audio_format',
                         action='store',
                         type=str,
-                        default='flac',
+                        default='wav',
                         help='Name of audio format used by ffmpeg for output audio')
 
     parser.add_argument('-vf',
@@ -289,7 +289,7 @@ def ffmpeg(ffmpeg_path, input_path, output_path, input_args=None,
 
 
 def download_yt_video(ytid, ts_start, ts_end, output_dir, ffmpeg_path, ffprobe_path,
-                      audio_codec='flac', audio_format='flac',
+                      audio_codec='wav', audio_format='wav',
                       audio_sample_rate=48000, audio_bit_depth=16,
                       video_codec='h264', video_format='mp4',
                       video_mode='bestvideoaudio', video_frame_rate=30,
@@ -638,7 +638,7 @@ def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
 
     LOGGER.info('Starting download jobs for subset "{}"'.format(subset_name))
     with open(subset_path, 'r') as f:
-        subset_data = csv.reader(f)
+        subset_data = list(csv.reader(f))
         subset_data = _select_rows(subset_data, percent_from, percent_to)
 
         # Set up multiprocessing pool
@@ -653,7 +653,7 @@ def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
                 # Skip files that already have been downloaded
                 media_filename = get_media_filename(ytid, ts_start, ts_end)
                 video_filepath = os.path.join(data_dir, 'video', media_filename + '.' + ffmpeg_cfg.get('video_format', 'mp4'))
-                audio_filepath = os.path.join(data_dir, 'audio', media_filename + '.' + ffmpeg_cfg.get('audio_format', 'flac'))
+                audio_filepath = os.path.join(data_dir, 'audio', media_filename + '.' + ffmpeg_cfg.get('audio_format', 'wav'))
                 if os.path.exists(video_filepath) and os.path.exists(audio_filepath):
                     info_msg = 'Already downloaded video {} ({} - {}). Skipping.'
                     LOGGER.info(info_msg.format(ytid, ts_start, ts_end))
