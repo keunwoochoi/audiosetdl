@@ -75,7 +75,7 @@ def parse_arguments():
                         dest='audio_codec',
                         action='store',
                         type=str,
-                        default='Signed Integer PCM',
+                        default='pcm_s16le',  # wav
                         help='Name of audio codec used by ffmpeg to encode output audio')
 
     parser.add_argument('-asr',

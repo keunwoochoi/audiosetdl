@@ -79,6 +79,9 @@ def validate_audio(audio_filepath, audio_info, end_past_video_end=False):
             continue
 
         output_v = sox_info[k]
+        if k == 'encoding':
+            if v == "Signed Integer PCM" and output_v in ['pcm_s16le']:  # todo: add more PCM names in FFMPEG.
+                continue
 
         try:
             v = float(v)
