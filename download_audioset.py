@@ -75,7 +75,7 @@ def parse_arguments():
                         dest='audio_codec',
                         action='store',
                         type=str,
-                        default='wav',
+                        default='Signed Integer PCM',
                         help='Name of audio codec used by ffmpeg to encode output audio')
 
     parser.add_argument('-asr',
@@ -186,7 +186,7 @@ def parse_arguments():
 
     parser.add_argument("--percent_from", default=0.0, type=float)
     parser.add_argument("--percent_to", default=100.0, type=float)
-    parser.add_argument("--csv_read_like", type=str, choices=['audioset_normal', 'audioset_strong', 'vggsound'])
+    parser.add_argument("--csv_read_like", type=str, required=True, choices=['audioset_normal', 'audioset_strong', 'vggsound'])
 
     return vars(parser.parse_args())
 
@@ -408,7 +408,8 @@ def download_yt_video(ytid, ts_start, ts_end, output_dir, ffmpeg_path, ffprobe_p
         'sample_rate': audio_sample_rate,
         'channels': 2,
         'bitrate': audio_bit_depth,
-        'encoding': audio_codec.upper(),
+        # 'encoding': audio_codec.upper(),
+        'encoding': audio_codec,
         'duration': duration
     }
     video_info = {
