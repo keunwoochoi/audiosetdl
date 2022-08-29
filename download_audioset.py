@@ -648,6 +648,7 @@ def download_subset_videos(subset_path, data_dir, ffmpeg_path, ffprobe_path,
             # remove overlapping by id.
             raise NotImplementedError('ah this sucks ughhh')
         elif csv_read_like == 'vggsound':
+            # written for vggsound.csv, not train.csv or test.csv.
             subset_data = pd.read_csv(csv_path, header=None, sep=",",
                                       names=['segment_id', 'start_time_seconds', 'positive_labels', 'split'])
         else:
